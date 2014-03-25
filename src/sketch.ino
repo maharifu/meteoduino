@@ -29,7 +29,7 @@ const int chipSelect = 4;
 
 const char head[] PROGMEM = {"<head><title>Home</title><script src='http://code.highcharts.com/adapters/standalone-framework.js'></script><script src='http://code.highcharts.com/highcharts.js'></script></head>"};
 
-const char js[] PROGMEM = {"<script>var e=document.querySelector('#x').innerHTML.split('\\n'),t=[],r=[];for(i=0;i<e.length;i++){var a=e[i].split(' ');if(a.length==4||a.length==2){if(a.length==4){var n=parseInt(a[0]),s=parseInt(a[1]),p=parseInt(a[2]),h=parseInt(a[3])}else{n+=s;p+=parseInt(a[0]);h+=parseInt(a[1])}t.push([n*1e3,p/10]);r.push([n*1e3,h/10])}}new Highcharts.Chart({chart:{renderTo:'x'},title:{text:'Meteo'},xAxis:{type:'datetime'},yAxis:{title:{text:'Meteo'}},series:[{name:'Humidity',data:t},{name:'Temperature',data:r}]})</script>"};
+const char js[] PROGMEM = {"<script>var a=document.querySelector('#x').innerHTML.split('\\n'),n=[],r=[];for(i=0;i<a.length;i++){var e=a[i].split(' ');if(e.length==4||e.length==2){if(e.length==4){var t=parseInt(e[0]),d=parseInt(e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=parseInt(e[1])}n.push([t*1e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.Chart({chart:{renderTo:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{type:'datetime',maxZoom:3600},yAxis:{title:{text:'Meteo'}},series:[{name:'Humidity',data:n},{name:'Temperature',data:r}]});var l=new EventSource('/i');l.onmessage=function(t){var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}</script>"};
 
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -52,7 +52,7 @@ uint32_t last_timestamp = 0;
 int last_h = 0;
 int last_t = 0;
 
-const int interval = 30; // In seconds
+const int interval = 5; // In seconds
 
 const char live[] = "GET /i HTTP/1.1";
 
@@ -211,9 +211,13 @@ void logValues(void) {
         Serial.println("Stream is not null");
         if (streamClient.connected()) {
           Serial.println("Stream client is connected");
-          streamClient.print(_h);
+          streamClient.print("data: ");
+          streamClient.print(tstamp);
           streamClient.print(" ");
-          streamClient.println(_t);
+          streamClient.print((int) (h * 10));
+          streamClient.print(" ");
+          streamClient.print((int) (t * 10));
+          streamClient.println("\n");
         } else {
           Serial.println("Stream client disconnected");
           streamClient.stop();
@@ -293,4 +297,5 @@ void stream(EthernetClient client) {
   streamClient = client;
   streamClient.println("HTTP/1.1 200 OK");
   streamClient.println("Content-Type: text/event-stream");
+  streamClient.println("Cache-Control: no-cache");
 }

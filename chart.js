@@ -1,3 +1,8 @@
+/*
+ * Compile with uglify.js
+ * uglifyjs chart.js -mt -m sort -e | tr \" \' | sed "s/\\\n/\\\\\\\n/" | sed "s/^[^{]\+{\(.*\)})();$/<script>\1<\/script>/"
+ * remove the surrounding function() and escape \n
+ */
 var values = document.querySelector("#x").innerHTML.split("\n"),
     humi = [],
     temp = [];
@@ -20,15 +25,17 @@ for(i=0;i<values.length;i++) {
   }
 }
 
-new Highcharts.Chart({
+var chart = new Highcharts.Chart({
   chart: {
-    renderTo: 'x'
+    renderTo: 'x',
+    zoomType: 'x'
   },
   title: {
     text: 'Meteo'
   },
   xAxis: {
-    type: 'datetime'
+    type: 'datetime',
+    maxZoom: 3600
   },
   yAxis: {
     title: {
@@ -43,3 +50,10 @@ new Highcharts.Chart({
     data: temp
   }]
 });
+
+var source = new EventSource('/i');
+source.onmessage = function(evt) {
+  var data = evt.data.split(" ");
+  chart.series[0].addPoint([parseInt(data[0]) * 1000,parseInt(data[1]) / 10.0]);
+  chart.series[1].addPoint([parseInt(data[0]) * 1000,parseInt(data[2]) / 10.0]);
+};
