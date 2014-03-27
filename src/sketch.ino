@@ -3,264 +3,282 @@
  *
  * See README.md for sensors and physical connections
  *
- * mail@lmcarvalho
- *
+ * Author: Luis Carvalho (mail@lmcarvalho)
+ * March 2014
  */
-// Ported to SdFat from the native Arduino SD library example by Bill Greiman
-// On the Ethernet Shield, CS is pin 4. SdFat handles setting SS
-const int chipSelect = 4;
 
+#include <Print.h>
 #include <SdFat.h>
+#include <SdFatUtil.h>
 #include <Ethernet.h>
 #include <Wire.h>
-#include <DHT.h>
 #include <Timer.h>
 
+// The RTC module reports years in YY form
 #define SECONDS_FROM_1970_TO_2000 946684800
+// RTC I2C address
 #define DS1307_ADDRESS 0x68
 
-#define DHTPIN 2         // what pin we're connected to
-#define DHTTYPE DHT22   // DHT 22  (AM2302)
+// What pin we're connected to
+#define DHTPIN 2
+// How many timing transitions we need to keep track of. 2 * number bits + extra
+#define MAXTIMINGS 85
+#define MAXCOUNT 6
 
-// Connect pin 1 (on the left) of the sensor to +5V
-// Connect pin 2 of the sensor to whatever your DHTPIN is
-// Connect pin 4 (on the right) of the sensor to GROUND
-// Connect a 10K resistor from pin 2 (data) to pin 1 (power) of the sensor
+// The filename in the SD card in which to store the values
+#define FILENAME "values.txt"
 
-const char head[] PROGMEM = {"<head><title>Home</title><script src='http://code.highcharts.com/adapters/standalone-framework.js'></script><script src='http://code.highcharts.com/highcharts.js'></script></head>"};
+// Store error strings in flash to save RAM
+#define error(s) sd.errorHalt_P(PSTR(s))
 
-const char js[] PROGMEM = {"<script>var a=document.querySelector('#x').innerHTML.split('\\n'),n=[],r=[];for(i=0;i<a.length;i++){var e=a[i].split(' ');if(e.length==4||e.length==2){if(e.length==4){var t=parseInt(e[0]),d=parseInt(e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=parseInt(e[1])}n.push([t*1e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.Chart({chart:{renderTo:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{type:'datetime',maxZoom:3600},yAxis:{title:{text:'Meteo'}},series:[{name:'Humidity',data:n},{name:'Temperature',data:r}]});var l=new EventSource('/i');l.onmessage=function(t){var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}</script>"};
+// SD card chip select (pin 4 by default)
+const uint8_t SD_CHIP_SELECT = SS;
 
-DHT dht(DHTPIN, DHTTYPE);
-
-// Enter a MAC address and IP address for your controller below.
-// The IP address will be dependent on your local network:
+// MAC and IP addresses
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-IPAddress ip(10,0,0,1);
+IPAddress ip(192,168,2,251);
+
+// HTML <head> section (includes Highcharts framework js)
+const char head[] PROGMEM = {"<head><title>Home</title><script src='http://code"
+    ".highcharts.com/adapters/standalone-framework.js'></script><script src='ht"
+    "tp://code.highcharts.com/highcharts.js'></script></head>"};
+// Main js script to build the chart (see chart.js)
+const char js[] PROGMEM = {"<script>var a=document.querySelector('#x').innerHTM"
+    "L.split('\\n'),n=[],r=[];for(i=0;i<a.length;i++){var e=a[i].split(' ');if("
+    "e.length==4||e.length==2){if(e.length==4){var t=parseInt(e[0]),d=parseInt("
+    "e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=par"
+    "seInt(e[1])}n.push([t*1e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highchart"
+    "s.Chart({chart:{renderTo:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{typ"
+    "e:'datetime',maxZoom:3600},yAxis:{title:{text:'Meteo'}},series:[{name:'Hum"
+    "idity',data:n},{name:'Temperature',data:r}]});var l=new EventSource('/i');"
+    "l.onmessage=function(t){var e=t.data.split(' ');o.series[0].addPoint([pars"
+    "eInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e"
+    "3,parseInt(e[2])/10])}</script>"};
+
+// stream-event HTTP Header
+const char stream_header[] PROGMEM = {
+    "HTTP/1.1 200 OK\n"
+    "Content-Type: text/event-stream\n"
+    "Cache-Control: no-cache\n"};
+// plain HTML HTTP Header
+const char html_header[] PROGMEM = {
+    "HTTP/1.1 200 OK\n"
+    "Content-Type: text/html\n"
+    "Connection: close\n"
+    "<!DOCTYPE HTML>\n"
+    "<html>\n"};
 
 // Initialize the Ethernet server library
-// with the IP address and port you want to use
-// (port 80 is default for HTTP):
 EthernetServer server(80);
 
+// Timer to periodically log sensor values
 Timer timer;
 
+// SD card-related variables
 SdFat sd;
-SdFile myFile;
+SdFile file;
 
-uint32_t last_timestamp = 0;
-int last_h = 0;
-int last_t = 0;
+// Sampling period, in seconds
+const unsigned short interval = 5 * 60;
 
-const int interval = 5; // In seconds
-
-const char live[] = "GET /i HTTP/1.1";
-
-char req[16];
-byte bytes_read;
-boolean get = true;
+// GET HTTP request header for the live stream
+const char streamReq[] = "GET /i HTTP/1.1";
+// Ethernet client variable, so we can keep the stream connection alive
 EthernetClient streamClient = NULL;
 
+// Last values read
+uint32_t last_tstamp = 0;
+short    last_humi   = 0;
+short    last_temp   = 0;
+
 void setup() {
-  // Open serial communications and wait for port to open:
+  // Open serial communications
   Serial.begin(9600);
-  while (!Serial) {
-    ; // wait for serial port to connect. Needed for Leonardo only
-  }
+  // Initialize RTC communications
   Wire.begin();
-  dht.begin();
 
-  // Initialize SdFat or print a detailed error message and halt
-  // Use half speed like the native library.
-  // change to SPI_FULL_SPEED for more performance.
-  if (!sd.begin(chipSelect, SPI_HALF_SPEED)) sd.initErrorHalt();
-  Serial.println("initialization done.");
+  // Initialize the SD at SPI_HALF_SPEED to avoid bus errors with
+  // breadboards. Use SPI_FULL_SPEED for better performance.
+  if (!sd.begin(SD_CHIP_SELECT, SPI_HALF_SPEED)) sd.initErrorHalt();
 
+  // Start by login sensor values
   logValues();
-  timer.every(interval * 1000, logValues); // Every 30s
+  // Every _interval_ seconds, log values. Forever!
+  timer.every(interval * 1000, logValues);
 
-  // start the Ethernet connection and the server:
+  // Start the Ethernet connection and the server
   Ethernet.begin(mac, ip);
   server.begin();
-  Serial.print("server is at ");
-  Serial.println(Ethernet.localIP());
+//  Serial.print("server is at ");
+//  Serial.println(Ethernet.localIP());
+  PgmPrintln("Ready");
 }
 
 void loop() {
-  // listen for incoming clients
+  // Listen for incoming clients
   EthernetClient client = server.available();
-  if (client) {
-    Serial.println("new client");
-    // an http request ends with a blank line
+  if( client ) {
+    PgmPrintln("new client");
+    // An http request ends with a blank line
     boolean currentLineIsBlank = true;
-    bytes_read = 0;
-    get = false;
-    while (client.connected()) {
-      if (client.available()) {
+    boolean startStream = false;
+    byte bytes_read = 0;
+
+    while( client.connected() ) {
+      if( client.available() ) {
         char c = client.read();
         Serial.write(c);
-        // if you've gotten to the end of the line (received a newline
+        // If you've gotten to the end of the line (received a newline
         // character) and the line is blank, the http request has ended,
         // so you can send a reply
-        if (c == '\n' && currentLineIsBlank) {
-          if(get) {
-            Serial.println("Starting stream");
-            stream(client);
-            break;
+        if( c == '\n' && currentLineIsBlank ) {
+          // If the request was for a stream session, I.E.: /i
+          if( startStream ) {
+            PgmPrintln("Starting stream");
+            httpStartStream(client);
           } else {
-            Serial.println("Normal request");
+            PgmPrintln("Normal request");
+            httpSendResponse(client);
+            // Give the web browser time to receive the data
+            delay(1);
+            // Close the connection:
+            client.stop();
           }
-          // send a standard http response header
-          client.println("HTTP/1.1 200 OK");
-          client.println("Content-Type: text/html");
-          // the connection will be closed after completion of the response
-          client.println("Connection: close");
-          // refresh the page automatically every 5 sec
-//          client.println("Refresh: 5");
-          client.println();
-          client.println("<!DOCTYPE HTML>");
-          client.println("<html>");
-
-          writeProgStr(client, head);
-          client.println("<body><div id='x'>");
-          // Output Temperature and Humidity values
-          // re-open the file for reading:
-          if (myFile.open("values.txt", O_READ)) {
-            // read from the file until there's nothing else in it:
-            int data;
-            while ((data = myFile.read()) >= 0) {
-              client.write(data);
-            }
-            // close the file:
-            myFile.close();
-          } else {
-            // if the file didn't open, print an error:
-            sd.errorHalt("opening values.txt for read failed");
-            client.println("error opening values.txt");
-          }
-          client.println("</div>");
-          writeProgStr(client, js);
-          client.println("</body></html>");
           break;
         }
-        if (c == '\n') {
-          if(!get) {
-            get = true;
-            for(byte i=0;i<bytes_read;i++) {
-              if(req[i] != live[i]) {
-                get = false;
-              }
-              Serial.write(req[i]);
-            }
-            bytes_read = 0;
+        if( c == '\n' ) {
+          // When the line has ended, and we have not identified the request
+          // as strea, and 15 bytes of the request match our request string
+          // GET /i HTTP/1.1
+          if( !startStream && bytes_read == 15 ) {
+            startStream = true;
           }
-          // you're starting a new line
+          // You're starting a new line
           currentLineIsBlank = true;
         } else if (c != '\r') {
-          if(bytes_read < 16) {
-            req[bytes_read++] = c;
-          }
-          // you've gotten a character on the current line
+          // You've gotten a character on the current line
           currentLineIsBlank = false;
+        } else if(bytes_read < 15) {
+          // Try to match /i request
+          if( streamReq[bytes_read] == c ) {
+            bytes_read++;
+          } else {
+            // Only allow it if the characters are sequential
+            bytes_read = 0;
+          }
         }
       }
-      timer.update();
     }
-    // give the web browser time to receive the data
-    delay(1);
-    // close the connection:
-    if(!get) {
-      client.stop();
-    }
-    Serial.println("client disconnected");
   }
+  // Check if _interval_ has passed
   timer.update();
 }
 
+/*
+ * Store values in SD card for later retrieval
+ * Send them through the ethernet, if a stream client is connected
+ *
+ */
 void logValues(void) {
-  float h = dht.readHumidity();
-  float t = dht.readTemperature();
-  int _h = 0;
-  int _t = 0;
-  uint32_t tstamp = timestamp();
-  if (isnan(t) || isnan(h)) {
-    Serial.println("Failed to read from DHT");
-  } else {
-    // open the file for write at end like the Native SD library
-    if (myFile.open("values.txt", O_RDWR | O_CREAT | O_AT_END)) {
-      // if the file opened okay, write to it:
-      _h = (int) (h * 10);
-      _t = (int) (t * 10);
-      if( last_timestamp == 0 ) {
-        myFile.print(tstamp);
-        myFile.print(" ");
-        myFile.print(interval);
-        myFile.print(" ");
-      } else {
-        _h = last_h - _h;
-        _t = last_t - _t;
-      }
-      myFile.print(_h);
-      myFile.print(" ");
-      myFile.print(_t);
-      myFile.println();
-      // close the file:
-      myFile.close();
+  PgmPrintln("logging values");
+  short h, t;
+  // Read values, check for success
+  if( dhtRead(t, h) ) {
+    // Check the time with the RTC
+    uint32_t tstamp = timestamp();
 
-      if(streamClient != NULL) {
-        Serial.println("Stream is not null");
-        if (streamClient.connected()) {
-          Serial.println("Stream client is connected");
-          streamClient.print("data: ");
-          streamClient.print(tstamp);
-          streamClient.print(" ");
-          streamClient.print((int) (h * 10));
-          streamClient.print(" ");
-          streamClient.print((int) (t * 10));
-          streamClient.println("\n");
-        } else {
-          Serial.println("Stream client disconnected");
-          streamClient.stop();
-        }
-      }
-
-      Serial.println("done.");
-      last_timestamp = tstamp;
-      last_h = (int) (h * 10);
-      last_t = (int) (t * 10);
-    } else {
-      // if the file didn't open, print an error:
-      sd.errorHalt("opening values.txt for write failed");
-      Serial.println("error opening values.txt");
+    PgmPrintln("opening file");
+    file.writeError = false;
+    // Open the file for write at end like the Native SD library
+    if( !file.open(FILENAME, O_CREAT | O_APPEND | O_WRITE) ) {
+      error("open failed");
     }
+    PgmPrintln("file ok");
+    // If the file opened okay, write to it:
+    if( last_tstamp == 0 ) {
+      // First time we write to the file
+      // Write the timestamp along with the values read
+      file.print(tstamp);
+      file.print(" ");
+      file.print(interval);
+      file.print(" ");
+      file.print(h);
+      file.print(" ");
+      file.println(t);
+    } else {
+      // We already have values on the file,
+      // write only the difference to the last values read, to save space
+      file.print(last_humi - h);
+      file.print(" ");
+      file.println(last_temp - t);
+    }
+    // Check for errors
+    if (file.writeError) error("write failed");
+    // Close the file:
+    if (!file.close()) error("close failed");
+
+    // Do we have a client?
+    if(streamClient != NULL) {
+      PgmPrintln("Stream is not null");
+      // Is it still connected?
+      if (streamClient.connected()) {
+        // Client is still online. Give it data
+        PgmPrintln("Stream client is connected");
+        streamClient.print("data: ");
+        streamClient.print(tstamp);
+        streamClient.print(" ");
+        streamClient.print(h);
+        streamClient.print(" ");
+        streamClient.print(t);
+        streamClient.println("\n"); // Finish with 2 \n just because
+      } else {
+        // Client disconnected in the meanwhile. Close the connection
+        PgmPrintln("Stream client disconnected");
+        streamClient.stop();
+        streamClient = NULL;
+      }
+    }
+    PgmPrintln("logValues done");
+    // Update last values read
+    last_tstamp = tstamp;
+    last_humi   = h;
+    last_temp   = t;
+  } else {
+    PgmPrintln("Failed to read from DHT");
   }
 }
 
-long time2long(uint16_t days, uint8_t h, uint8_t m, uint8_t s) {
-  return ((days * 24L + h) * 60 + m) * 60 + s;
-}
-
-//has to be const or compiler compaints
+/*
+ * Number of days in all months of the year
+ */
 const uint8_t daysInMonth [] PROGMEM = { 31,28,31,30,31,30,31,31,30,31,30,31 };
 
-// number of days since 2000/01/01, valid for 2001..2099
-static uint16_t date2days(uint16_t y, uint8_t m, uint8_t d) {
-    uint16_t days = d;
-    for (uint8_t i = 1; i < m; ++i) {
-      days += pgm_read_byte(daysInMonth + i - 1);
-    }
-    if (m > 2 && y % 4 == 0) {
-      ++days;
-    }
-    return days + 365 * y + (y + 3) / 4 - 1;
+/*
+ * Number of days since 2000/01/01, valid for 2001..2099
+ */
+static uint16_t date2days(uint8_t y, uint8_t m, uint8_t d) {
+  uint16_t days = d;
+  for( uint8_t i = 1; i < m; ++i ) {
+    days += pgm_read_byte(daysInMonth + i - 1);
+  }
+  if( m > 2 && y % 4 == 0 ) {
+    ++days;
+  }
+  return days + 365 * y + (y + 3) / 4 - 1;
 }
 
+/*
+ * Convert binary coded decimal to normal decimal numbers
+ */
 static byte bcd2dec(byte val)  {
-  // Convert binary coded decimal to normal decimal numbers
   return ( (val/16*10) + (val%16) );
 }
 
-static uint32_t timestamp(void) {
+/*
+ * Read the current time from the RTC chip
+ * Returns number of seconds since UNIX epoch
+ */
+uint32_t timestamp(void) {
   // Reset the register pointer
   Wire.beginTransmission(DS1307_ADDRESS);
   Wire.write(0);
@@ -268,34 +286,124 @@ static uint32_t timestamp(void) {
 
   Wire.requestFrom(DS1307_ADDRESS, 7);
 
-  int ss = bcd2dec(Wire.read());
-  int mm = bcd2dec(Wire.read());
-  int hh = bcd2dec(Wire.read() & 0b111111); //24 hour time
-  int __ = bcd2dec(Wire.read()); // DayOfWeek - Discard
-  int d  = bcd2dec(Wire.read());
-  int m  = bcd2dec(Wire.read());
-  int y  = bcd2dec(Wire.read());
+  uint8_t ss = bcd2dec(Wire.read());
+  uint8_t mm = bcd2dec(Wire.read());
+  uint8_t hh = bcd2dec(Wire.read() & 0b111111); //24 hour time
+  uint8_t __ = bcd2dec(Wire.read()); // DayOfWeek - Discard
+  uint8_t d  = bcd2dec(Wire.read());
+  uint8_t m  = bcd2dec(Wire.read());
+  uint8_t y  = bcd2dec(Wire.read());
 
   uint16_t days = date2days(y, m, d);
 
-  uint32_t t = time2long(days, hh, mm, ss);
-  t += SECONDS_FROM_1970_TO_2000;
-
-  return t;
+  return ((days * 24L + hh) * 60 + mm) * 60 + ss + SECONDS_FROM_1970_TO_2000;
 }
 
-// given a PROGMEM string, use Serial.print() to send it out
-static void writeProgStr(EthernetClient client, const char str[]) {
-  char c;
-  if(!str) return;
-  while((c = pgm_read_byte(str++))) {
-    client.write(c);
-  }
-}
-
-void stream(EthernetClient client) {
+/*
+ * HTTP
+ * Start streaming
+ */
+void httpStartStream(EthernetClient client) {
+  // Save client pointer for later
   streamClient = client;
-  streamClient.println("HTTP/1.1 200 OK");
-  streamClient.println("Content-Type: text/event-stream");
-  streamClient.println("Cache-Control: no-cache");
+  progWrite(&streamClient, stream_header);
+}
+
+/*
+ * HTTP
+ * Serve normal response page
+ */
+void httpSendResponse(EthernetClient client) {
+  progWrite(&streamClient, html_header);
+  // Write standard http response header and beginning of body
+  progWrite(&client, head);
+  client.println("<html><body><div id='x'>");
+
+  // Output Temperature and Humidity values stored in values.txt
+  if( file.open(FILENAME, O_READ) ) {
+    // read from the file until there's nothing else in it:
+    int16_t c;
+    while ((c = file.read()) > 0) client.write((char)c);
+    // close the file:
+    if (!file.close()) error("close failed");
+  } else {
+    // if the file didn't open, print an error:
+    error("file.open");
+  }
+  client.println("</div>");
+  progWrite(&client, js);
+  client.println("</body></html>");
+}
+
+/*
+ * Read sensor data from DHT
+ * Taken from Adafruit's DHT library
+ * https://github.com/adafruit/DHT-sensor-library
+ */
+boolean dhtRead(short &temp, short &humi) {
+  uint8_t data[6];
+  uint8_t laststate = HIGH;
+  uint8_t counter = 0;
+  uint8_t j = 0, i;
+
+  // pull the pin high and wait 250 milliseconds
+  digitalWrite(DHTPIN, HIGH);
+  delay(250);
+
+  data[0] = data[1] = data[2] = data[3] = data[4] = 0;
+
+  // now pull it low for ~20 milliseconds
+  pinMode(DHTPIN, OUTPUT);
+  digitalWrite(DHTPIN, LOW);
+  delay(20);
+  cli();
+  digitalWrite(DHTPIN, HIGH);
+  delayMicroseconds(40);
+  pinMode(DHTPIN, INPUT);
+
+  // read in timings
+  for ( i=0; i < MAXTIMINGS; i++) {
+    counter = 0;
+    while (digitalRead(DHTPIN) == laststate) {
+      counter++;
+      delayMicroseconds(1);
+      if (counter == 255) {
+        break;
+      }
+    }
+    laststate = digitalRead(DHTPIN);
+
+    if (counter == 255) break;
+
+    // ignore first 3 transitions
+    if ((i >= 4) && (i%2 == 0)) {
+      // shove each bit into the storage bytes
+      data[j/8] <<= 1;
+      if (counter > MAXCOUNT)
+        data[j/8] |= 1;
+      j++;
+    }
+  }
+  sei();
+  // check we read 40 bits and that the checksum matches
+  if ((j >= 40) && (data[4] == ((data[0]+data[1]+data[2]+data[3]) & 0xFF))) {
+    humi = data[0] * 256 + data[1];
+    temp = (data[2] & 0x7F) * 256 + data[3];
+    if (data[2] & 0x80) {
+	    temp *= -1;
+    }
+    return true;
+  }
+  return false;
+}
+
+/*
+ * Write from PROGMEM into any Print object
+ * Useful to print PROGMEM vars into Ethernet client
+ */
+void progWrite(Print *ptr, const char* str) {
+  char c;
+  while(c = pgm_read_byte(str++)) {
+    (*ptr).write(c);
+  }
 }
