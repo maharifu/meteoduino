@@ -29,44 +29,50 @@
 #define FILENAME "values.txt"
 
 // Store error strings in flash to save RAM
-#define error(s) sd.errorHalt_P(PSTR(s))
+//#define error(s) sd.errorHalt_P(PSTR(s))
+#define error(s) SerialPrintln_P(PSTR(s))
 
 // SD card chip select (pin 4 by default)
-const uint8_t SD_CHIP_SELECT = SS;
+//const uint8_t SD_CHIP_SELECT = SS;
+#define SD_CHIP_SELECT 4
 
 // MAC and IP addresses
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 IPAddress ip(192,168,2,251);
+//IPAddress ip(10,0,0,1);
 
 // HTML <head> section (includes Highcharts framework js)
-const char head[] PROGMEM = {"<head><title>Home</title><script src='http://code"
-    ".highcharts.com/adapters/standalone-framework.js'></script><script src='ht"
-    "tp://code.highcharts.com/highcharts.js'></script></head>"};
+const char head[] PROGMEM = {
+    "<head><title>Home</title><script src='http://code.highcharts.com/adapters/"
+    "standalone-framework.js'></script><script src='http://code.highcharts.com/"
+    "highcharts.js'></script></head>"};
+
 // Main js script to build the chart (see chart.js)
-const char js[] PROGMEM = {"<script>var a=document.querySelector('#x').innerHTM"
-    "L.split('\\n'),n=[],r=[];for(i=0;i<a.length;i++){var e=a[i].split(' ');if("
-    "e.length==4||e.length==2){if(e.length==4){var t=parseInt(e[0]),d=parseInt("
-    "e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=par"
-    "seInt(e[1])}n.push([t*1e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highchart"
-    "s.Chart({chart:{renderTo:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{typ"
-    "e:'datetime',maxZoom:3600},yAxis:{title:{text:'Meteo'}},series:[{name:'Hum"
-    "idity',data:n},{name:'Temperature',data:r}]});var l=new EventSource('/i');"
-    "l.onmessage=function(t){var e=t.data.split(' ');o.series[0].addPoint([pars"
-    "eInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e"
-    "3,parseInt(e[2])/10])}</script>"};
+const char js[] PROGMEM = {
+    "<script>var a=document.querySelector('#x').innerHTML.split('\\n'),n=[],r=["
+    "];for(i=0;i<a.length;i++){var e=a[i].split(' ');if(e.length==4||e.length=="
+    "2){if(e.length==4){var t=parseInt(e[0]),d=parseInt(e[1]),s=parseInt(e[2]),"
+    "p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=parseInt(e[1])}n.push([t*1"
+    "e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.Chart({chart:{renderT"
+    "o:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{type:'datetime',maxZoom:36"
+    "00},yAxis:{title:{text:'Meteo'}},series:[{name:'Humidity',data:n},{name:'T"
+    "emperature',data:r}]});var l=new EventSource('/i');l.onmessage=function(t)"
+    "{var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseInt"
+    "(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}<"
+    "/script>"};
 
 // stream-event HTTP Header
 const char stream_header[] PROGMEM = {
     "HTTP/1.1 200 OK\n"
     "Content-Type: text/event-stream\n"
-    "Cache-Control: no-cache\n"};
+    "Cache-Control: no-cache\n\n"};
+
 // plain HTML HTTP Header
 const char html_header[] PROGMEM = {
     "HTTP/1.1 200 OK\n"
     "Content-Type: text/html\n"
-    "Connection: close\n"
-    "<!DOCTYPE HTML>\n"
-    "<html>\n"};
+    "Connection: close\n\n"
+    "<!DOCTYPE HTML>\n<html>\n"};
 
 // Initialize the Ethernet server library
 EthernetServer server(80);
@@ -79,7 +85,7 @@ SdFat sd;
 SdFile file;
 
 // Sampling period, in seconds
-const unsigned short interval = 5 * 60;
+const uint16_t interval = 5 * 60;
 
 // GET HTTP request header for the live stream
 const char streamReq[] = "GET /i HTTP/1.1";
@@ -104,13 +110,11 @@ void setup() {
   // Start by login sensor values
   logValues();
   // Every _interval_ seconds, log values. Forever!
-  timer.every(interval * 1000, logValues);
+  timer.every(((unsigned long) interval) * 1000, logValues);
 
   // Start the Ethernet connection and the server
   Ethernet.begin(mac, ip);
   server.begin();
-//  Serial.print("server is at ");
-//  Serial.println(Ethernet.localIP());
   PgmPrintln("Ready");
 }
 
@@ -155,16 +159,20 @@ void loop() {
           }
           // You're starting a new line
           currentLineIsBlank = true;
-        } else if (c != '\r') {
-          // You've gotten a character on the current line
-          currentLineIsBlank = false;
-        } else if(bytes_read < 15) {
-          // Try to match /i request
-          if( streamReq[bytes_read] == c ) {
-            bytes_read++;
-          } else {
-            // Only allow it if the characters are sequential
-            bytes_read = 0;
+        } else {
+          if( c != '\r' ) {
+            // You've gotten a character on the current line
+            currentLineIsBlank = false;
+          }
+
+          if( bytes_read < 15 ) {
+            // Try to match /i request
+            if( streamReq[bytes_read] == c ) {
+              bytes_read++;
+            } else {
+              // Only allow it if the characters are sequential
+              bytes_read = 0;
+            }
           }
         }
       }
@@ -187,6 +195,10 @@ void logValues(void) {
     // Check the time with the RTC
     uint32_t tstamp = timestamp();
 
+    if( last_tstamp != 0 ) {
+      Serial.println(tstamp - last_tstamp);
+    }
+
     PgmPrintln("opening file");
     file.writeError = false;
     // Open the file for write at end like the Native SD library
@@ -195,6 +207,7 @@ void logValues(void) {
     }
     PgmPrintln("file ok");
     // If the file opened okay, write to it:
+    // Don't tolerate errors > than 5 seconds
     if( last_tstamp == 0 ) {
       // First time we write to the file
       // Write the timestamp along with the values read
@@ -304,6 +317,7 @@ uint32_t timestamp(void) {
  * Start streaming
  */
 void httpStartStream(EthernetClient client) {
+  PgmPrintln("Stream request");
   // Save client pointer for later
   streamClient = client;
   progWrite(&streamClient, stream_header);
@@ -314,10 +328,11 @@ void httpStartStream(EthernetClient client) {
  * Serve normal response page
  */
 void httpSendResponse(EthernetClient client) {
-  progWrite(&streamClient, html_header);
+  PgmPrintln("HTML request");
+  progWrite(&client, html_header);
   // Write standard http response header and beginning of body
   progWrite(&client, head);
-  client.println("<html><body><div id='x'>");
+  client.println("<body><div id='x'>");
 
   // Output Temperature and Humidity values stored in values.txt
   if( file.open(FILENAME, O_READ) ) {
