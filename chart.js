@@ -1,6 +1,6 @@
 /*
  * Compile with uglify.js
- * uglifyjs chart.js -mt -m sort -e | tr \" \' | sed "s/\\\n/\\\\\\\n/" | sed "s/^[^{]\+{\(.*\)})();$/<script>\1<\/script>/"
+ * uglifyjs chart.js -mt -m sort -e | tr \" \' | sed "s/\\\n/\\\\\\\n/" | sed "s/^[^{]\+{\(.*\)})();$/\"<script>\1<\/script>\"/" | sed "s/\([^\"]\{74\}\)/\1\"\n\"/g"
  * remove the surrounding function() and escape \n
  */
 var values = document.querySelector("#x").innerHTML.split("\n"),
@@ -25,22 +25,40 @@ for(i=0;i<values.length;i++) {
   }
 }
 
-var chart = new Highcharts.Chart({
+var chart = new Highcharts.StockChart({
   chart: {
-    renderTo: 'x',
-    zoomType: 'x'
+    renderTo: 'x'
   },
   title: {
     text: 'Meteo'
   },
-  xAxis: {
-    type: 'datetime',
-    maxZoom: 3600
+  rangeSelector: {
+    buttons: [{
+      type: 'day',
+      count: 1,
+      text: '1d'
+    }, {
+      type: 'week',
+      count: 1,
+      text: '1w'
+    }, {
+      type: 'month',
+      count: 1,
+      text: '1m'
+    }, {
+      type: 'ytd',
+      text: 'YTD'
+    }, {
+      type: 'year',
+      count: 1,
+      text: '1y'
+    }, {
+      type: 'all',
+      text: 'All'
+    }]
   },
-  yAxis: {
-    title: {
-      text: 'Meteo'
-    }
+  legend: {
+    enabled: true
   },
   series: [{
     name: 'Humidity',

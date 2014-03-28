@@ -25,6 +25,9 @@
 #define MAXTIMINGS 85
 #define MAXCOUNT 6
 
+// Maximum allowed clock drift between updates
+#define MAXDRIFT 5
+
 // The filename in the SD card in which to store the values
 #define FILENAME "values.txt"
 
@@ -45,21 +48,23 @@ IPAddress ip(192,168,2,251);
 const char head[] PROGMEM = {
     "<head><title>Home</title><script src='http://code.highcharts.com/adapters/"
     "standalone-framework.js'></script><script src='http://code.highcharts.com/"
-    "highcharts.js'></script></head>"};
+    "stock/highstock.js'></script></head>"};
 
 // Main js script to build the chart (see chart.js)
 const char js[] PROGMEM = {
-    "<script>var a=document.querySelector('#x').innerHTML.split('\\n'),n=[],r=["
-    "];for(i=0;i<a.length;i++){var e=a[i].split(' ');if(e.length==4||e.length=="
-    "2){if(e.length==4){var t=parseInt(e[0]),d=parseInt(e[1]),s=parseInt(e[2]),"
-    "p=parseInt(e[3])}else{t+=d;s+=parseInt(e[0]);p+=parseInt(e[1])}n.push([t*1"
-    "e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.Chart({chart:{renderT"
-    "o:'x',zoomType:'x'},title:{text:'Meteo'},xAxis:{type:'datetime',maxZoom:36"
-    "00},yAxis:{title:{text:'Meteo'}},series:[{name:'Humidity',data:n},{name:'T"
-    "emperature',data:r}]});var l=new EventSource('/i');l.onmessage=function(t)"
-    "{var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseInt"
-    "(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}<"
-    "/script>"};
+    "<script>var n=document.querySelector('#x').innerHTML.split('\\n'),a=[],r=["
+    "];for(i=0;i<n.length;i++){var e=n[i].split(' ');if(e.length==4||e.length=="
+    "2){if(e.length==4){var t=parseInt(e[0]),l=parseInt(e[1]),s=parseInt(e[2]),"
+    "p=parseInt(e[3])}else{t+=l;s+=parseInt(e[0]);p+=parseInt(e[1])}a.push([t*1"
+    "e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.StockChart({chart:{re"
+    "nderTo:'x'},title:{text:'Meteo'},rangeSelector:{buttons:[{type:'day',count"
+    ":1,text:'1d'},{type:'week',count:1,text:'1w'},{type:'month',count:1,text:'"
+    "1m'},{type:'ytd',text:'YTD'},{type:'year',count:1,text:'1y'},{type:'all',t"
+    "ext:'All'}]},legend:{enabled:true},series:[{name:'Humidity',data:a},{name:"
+    "'Temperature',data:r}]});var d=new EventSource('/i');d.onmessage=function("
+    "t){var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseI"
+    "nt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])"
+    "}</script>"};
 
 // stream-event HTTP Header
 const char stream_header[] PROGMEM = {
@@ -96,6 +101,7 @@ EthernetClient streamClient = NULL;
 uint32_t last_tstamp = 0;
 short    last_humi   = 0;
 short    last_temp   = 0;
+uint8_t  drift       = 0;
 
 void setup() {
   // Open serial communications
@@ -194,10 +200,9 @@ void logValues(void) {
   if( dhtRead(t, h) ) {
     // Check the time with the RTC
     uint32_t tstamp = timestamp();
-
-    if( last_tstamp != 0 ) {
-      Serial.println(tstamp - last_tstamp);
-    }
+    // Update drift
+    // On first run, drift = tstamp - interval
+    drift += tstamp - last_tstamp - interval;
 
     PgmPrintln("opening file");
     file.writeError = false;
@@ -208,7 +213,8 @@ void logValues(void) {
     PgmPrintln("file ok");
     // If the file opened okay, write to it:
     // Don't tolerate errors > than 5 seconds
-    if( last_tstamp == 0 ) {
+    if( drift > MAXDRIFT ) {
+      drift = 0;
       // First time we write to the file
       // Write the timestamp along with the values read
       file.print(tstamp);
@@ -221,9 +227,9 @@ void logValues(void) {
     } else {
       // We already have values on the file,
       // write only the difference to the last values read, to save space
-      file.print(last_humi - h);
+      file.print(h - last_humi);
       file.print(" ");
-      file.println(last_temp - t);
+      file.println(t - last_temp);
     }
     // Check for errors
     if (file.writeError) error("write failed");
