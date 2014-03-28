@@ -12,11 +12,17 @@ Hardware
 * DHT22 Temperature/Humidity Sensor
 * DS1307 RTC Module
 
+Wiring
+------
+
+"Wiring Diagram":/wiring.png
+
 Software
 --------
 
-* Adafruit DHT library
-* SdFatLib
-* JChristensen's Timer library
+* Adafruit DHT library - https://github.com/adafruit/DHT-sensor-library
+* Bill Greiman's SdFatLib - http://code.google.com/p/sdfatlib/
+* JChristensen's Timer library - https://github.com/JChristensen/Timer
+* Highstock charts - http://www.highcharts.com/
 
 This is still a work-in-progress. No time for README, must write code!
