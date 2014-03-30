@@ -95,7 +95,8 @@ const uint16_t interval = 5 * 60;
 // GET HTTP request header for the live stream
 const char streamReq[] = "GET /i HTTP/1.1";
 // Ethernet client variable, so we can keep the stream connection alive
-EthernetClient streamClient = NULL;
+EthernetClient streamClient;
+boolean streamConnected = false;
 
 // Last values read
 uint32_t last_tstamp = 0;
@@ -214,6 +215,7 @@ void logValues(void) {
     // If the file opened okay, write to it:
     // Don't tolerate errors > than 5 seconds
     if( drift > MAXDRIFT ) {
+      PgmPrintln("MAXDRIFT exceeded");
       drift = 0;
       // First time we write to the file
       // Write the timestamp along with the values read
@@ -232,15 +234,15 @@ void logValues(void) {
       file.println(t - last_temp);
     }
     // Check for errors
-    if (file.writeError) error("write failed");
+    if( file.writeError ) error("write failed");
     // Close the file:
-    if (!file.close()) error("close failed");
+    if( !file.close() ) error("close failed");
 
     // Do we have a client?
-    if(streamClient != NULL) {
+    if( streamConnected ) {
       PgmPrintln("Stream is not null");
       // Is it still connected?
-      if (streamClient.connected()) {
+      if( streamClient.connected() ) {
         // Client is still online. Give it data
         PgmPrintln("Stream client is connected");
         streamClient.print("data: ");
@@ -254,7 +256,7 @@ void logValues(void) {
         // Client disconnected in the meanwhile. Close the connection
         PgmPrintln("Stream client disconnected");
         streamClient.stop();
-        streamClient = NULL;
+        streamConnected = false;
       }
     }
     PgmPrintln("logValues done");
@@ -324,8 +326,13 @@ uint32_t timestamp(void) {
  */
 void httpStartStream(EthernetClient client) {
   PgmPrintln("Stream request");
+  // Disconnect previous client
+  if( streamConnected ) {
+    streamClient.stop();
+  }
   // Save client pointer for later
   streamClient = client;
+  streamConnected = true;
   progWrite(&streamClient, stream_header);
 }
 

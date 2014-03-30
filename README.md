@@ -15,7 +15,7 @@ Hardware
 Wiring
 ------
 
-"Wiring Diagram":/wiring.png
+![Wiring Diagram](wiring.png)
 
 Software
 --------
