@@ -3,6 +3,14 @@
  * uglifyjs chart.js -mt -m sort -e | tr \" \' | sed "s/\\\n/\\\\\\\n/" | sed "s/^[^{]\+{\(.*\)})();$/\"<script>\1<\/script>\"/" | sed "s/\([^\"]\{74\}\)/\1\"\n\"/g"
  * remove the surrounding function() and escape \n
  */
+
+// Do not use UTC to show correct DST times
+Highcharts.setOptions({
+  global: {
+    useUTC: false
+  }
+});
+
 var values = document.querySelector("#x").innerHTML.split("\n"),
     humi = [],
     temp = [];

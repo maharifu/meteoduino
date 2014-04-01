@@ -46,25 +46,25 @@ IPAddress ip(192,168,2,251);
 
 // HTML <head> section (includes Highcharts framework js)
 const char head[] PROGMEM = {
-    "<head><title>Home</title><script src='http://code.highcharts.com/adapters/"
-    "standalone-framework.js'></script><script src='http://code.highcharts.com/"
-    "stock/highstock.js'></script></head>"};
+    "<head><title>Meteoduino</title><script src='http://code.highcharts.com/ada"
+    "pters/standalone-framework.js'></script><script src='http://code.highchart"
+    "s.com/stock/highstock.js'></script></head>"};
 
 // Main js script to build the chart (see chart.js)
 const char js[] PROGMEM = {
-    "<script>var n=document.querySelector('#x').innerHTML.split('\\n'),a=[],r=["
-    "];for(i=0;i<n.length;i++){var e=n[i].split(' ');if(e.length==4||e.length=="
-    "2){if(e.length==4){var t=parseInt(e[0]),l=parseInt(e[1]),s=parseInt(e[2]),"
-    "p=parseInt(e[3])}else{t+=l;s+=parseInt(e[0]);p+=parseInt(e[1])}a.push([t*1"
-    "e3,s/10]);r.push([t*1e3,p/10])}}var o=new Highcharts.StockChart({chart:{re"
-    "nderTo:'x'},title:{text:'Meteo'},rangeSelector:{buttons:[{type:'day',count"
-    ":1,text:'1d'},{type:'week',count:1,text:'1w'},{type:'month',count:1,text:'"
-    "1m'},{type:'ytd',text:'YTD'},{type:'year',count:1,text:'1y'},{type:'all',t"
-    "ext:'All'}]},legend:{enabled:true},series:[{name:'Humidity',data:a},{name:"
-    "'Temperature',data:r}]});var d=new EventSource('/i');d.onmessage=function("
-    "t){var e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseI"
-    "nt(e[1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])"
-    "}</script>"};
+    "<script>Highcharts.setOptions({global:{useUTC:false}});var n=document.quer"
+    "ySelector('#x').innerHTML.split('\\n'),a=[],r=[];for(i=0;i<n.length;i++){v"
+    "ar e=n[i].split(' ');if(e.length==4||e.length==2){if(e.length==4){var t=pa"
+    "rseInt(e[0]),l=parseInt(e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=l;"
+    "s+=parseInt(e[0]);p+=parseInt(e[1])}a.push([t*1e3,s/10]);r.push([t*1e3,p/1"
+    "0])}}var o=new Highcharts.StockChart({chart:{renderTo:'x'},title:{text:'Me"
+    "teo'},rangeSelector:{buttons:[{type:'day',count:1,text:'1d'},{type:'week',"
+    "count:1,text:'1w'},{type:'month',count:1,text:'1m'},{type:'ytd',text:'YTD'"
+    "},{type:'year',count:1,text:'1y'},{type:'all',text:'All'}]},legend:{enable"
+    "d:true},series:[{name:'Humidity',data:a},{name:'Temperature',data:r}]});va"
+    "r u=new EventSource('/i');u.onmessage=function(t){var e=t.data.split(' ');"
+    "o.series[0].addPoint([parseInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].a"
+    "ddPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}</script>"};
 
 // stream-event HTTP Header
 const char stream_header[] PROGMEM = {
@@ -217,7 +217,7 @@ void logValues(void) {
     if( drift > MAXDRIFT ) {
       PgmPrintln("MAXDRIFT exceeded");
       drift = 0;
-      // First time we write to the file
+      // Measurement timings drifted
       // Write the timestamp along with the values read
       file.print(tstamp);
       file.print(" ");
@@ -227,7 +227,7 @@ void logValues(void) {
       file.print(" ");
       file.println(t);
     } else {
-      // We already have values on the file,
+      // We are within an acceptable clock drift,
       // write only the difference to the last values read, to save space
       file.print(h - last_humi);
       file.print(" ");
@@ -326,9 +326,10 @@ uint32_t timestamp(void) {
  */
 void httpStartStream(EthernetClient client) {
   PgmPrintln("Stream request");
-  // Disconnect previous client
+  // We support only one strem client for now
   if( streamConnected ) {
-    streamClient.stop();
+    PgmPrintln("stream client already connected");
+    return;
   }
   // Save client pointer for later
   streamClient = client;
