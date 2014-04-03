@@ -52,19 +52,20 @@ const char head[] PROGMEM = {
 
 // Main js script to build the chart (see chart.js)
 const char js[] PROGMEM = {
-    "<script>Highcharts.setOptions({global:{useUTC:false}});var n=document.quer"
-    "ySelector('#x').innerHTML.split('\\n'),a=[],r=[];for(i=0;i<n.length;i++){v"
-    "ar e=n[i].split(' ');if(e.length==4||e.length==2){if(e.length==4){var t=pa"
+    "<script>Highcharts.setOptions({global:{useUTC:false}});var a=document.quer"
+    "ySelector('#x').innerHTML.split('\\n'),n=[],r=[];for(i=0;i<a.length;i++){v"
+    "ar e=a[i].split(' ');if(e.length==4||e.length==2){if(e.length==4){var t=pa"
     "rseInt(e[0]),l=parseInt(e[1]),s=parseInt(e[2]),p=parseInt(e[3])}else{t+=l;"
-    "s+=parseInt(e[0]);p+=parseInt(e[1])}a.push([t*1e3,s/10]);r.push([t*1e3,p/1"
+    "s+=parseInt(e[0]);p+=parseInt(e[1])}n.push([t*1e3,s/10]);r.push([t*1e3,p/1"
     "0])}}var o=new Highcharts.StockChart({chart:{renderTo:'x'},title:{text:'Me"
     "teo'},rangeSelector:{buttons:[{type:'day',count:1,text:'1d'},{type:'week',"
     "count:1,text:'1w'},{type:'month',count:1,text:'1m'},{type:'ytd',text:'YTD'"
     "},{type:'year',count:1,text:'1y'},{type:'all',text:'All'}]},legend:{enable"
-    "d:true},series:[{name:'Humidity',data:a},{name:'Temperature',data:r}]});va"
-    "r u=new EventSource('/i');u.onmessage=function(t){var e=t.data.split(' ');"
-    "o.series[0].addPoint([parseInt(e[0])*1e3,parseInt(e[1])/10]);o.series[1].a"
-    "ddPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}</script>"};
+    "d:true},series:[{name:'Humidity',data:n,gapSize:10},{name:'Temperature',da"
+    "ta:r,gapSize:10}]});var u=new EventSource('/i');u.onmessage=function(t){va"
+    "r e=t.data.split(' ');o.series[0].addPoint([parseInt(e[0])*1e3,parseInt(e["
+    "1])/10]);o.series[1].addPoint([parseInt(e[0])*1e3,parseInt(e[2])/10])}</sc"
+    "ript>"};
 
 // stream-event HTTP Header
 const char stream_header[] PROGMEM = {

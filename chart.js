@@ -70,10 +70,12 @@ var chart = new Highcharts.StockChart({
   },
   series: [{
     name: 'Humidity',
-    data: humi
+    data: humi,
+    gapSize: 10
   }, {
     name: 'Temperature',
-    data: temp
+    data: temp,
+    gapSize: 10
   }]
 });
 
